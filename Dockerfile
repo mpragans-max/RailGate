@@ -131,7 +131,10 @@ RUN set -eux; \
 EXPOSE 8080/tcp
 EXPOSE 2443/tcp
 
-VOLUME ["/data"]
+# NOTE: persistent storage at /data is provided by a Railway Volume mounted
+# on this service (configure under Service -> Volumes in the dashboard).
+# Docker's native VOLUME instruction is intentionally omitted - Railway's
+# Dockerfile builder rejects it.
 
 # Local convenience; Railway uses railway.json's healthcheckPath instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
