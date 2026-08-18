@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# Persistent runtime data — NEVER commit. Contains the SQLite DB, REALITY
+# private key material, generated Xray config and backups.
+# ---------------------------------------------------------------------------
+/data/
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Generated Xray runtime configuration (may contain the REALITY private key)
+xray/generated/*
+!xray/generated/.gitkeep
+
+# Key material / secrets
+*.pem
+*.key
+reality-private-key
+reality-public-key
+short-id
+.env
+.env.*
+!.env.example
+
+# Backups & sessions
+backups/
+/backups/
+sessions/
+*.tar.gz
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

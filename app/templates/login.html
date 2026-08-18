@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Sign in · {{ settings.app_name }}{% endblock %}
+{% block body_class %}auth{% endblock %}
+
+{% block anon_content %}
+<div class="auth-wrap">
+  <form class="auth-card" method="post" action="/login" autocomplete="off">
+    <div class="auth-brand">
+      <span class="brand-mark" aria-hidden="true">RG</span>
+      <h1>RailGate</h1>
+      <p class="muted">{{ settings.app_name }}</p>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <label class="field">
+      <span class="field-label">Username</span>
+      <input class="input" type="text" name="username" autocomplete="username"
+             required autofocus spellcheck="false">
+    </label>
+
+    <label class="field">
+      <span class="field-label">Password</span>
+      <input class="input" type="password" name="password" autocomplete="current-password" required>
+    </label>
+
+    <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+
+    <p class="auth-hint muted">
+      Credentials come from the <code>ADMIN_USERNAME</code> and
+      <code>ADMIN_PASSWORD</code> environment variables.
+    </p>
+  </form>
+  <p class="auth-version muted">RailGate v{{ app_version }}</p>
+</div>
+{% endblock %}

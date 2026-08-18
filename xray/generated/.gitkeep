@@ -1,0 +1,3 @@
+# Rendered Xray configurations are written to $DATA_DIR/xray/ at runtime and are
+# never committed. This directory only exists so the repository layout matches
+# the documentation and so local tooling has somewhere to write scratch files.

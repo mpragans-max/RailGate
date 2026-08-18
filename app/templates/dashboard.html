@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ settings.app_name }}{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+
+{% block content %}
+
+{% if not endpoint.available %}
+<div class="alert alert-warn" role="status">
+  <strong>TCP Proxy: NOT CONFIGURED.</strong>
+  The primary VLESS + REALITY link cannot be generated yet.
+  <br>{{ tcp_hint }}
+  {% if fallback.available %}
+  <br>The WebSocket fallback over <code>{{ fallback.host }}</code> is available in the meantime.
+  {% endif %}
+</div>
+{% endif %}
+
+{% if not volume_writable %}
+<div class="alert alert-error" role="alert"><strong>Persistent storage problem.</strong> {{ volume_error }}</div>
+{% endif %}
+
+<section class="grid grid-4">
+  <article class="card stat">
+    <span class="stat-label">Xray</span>
+    <span class="stat-value">
+      <span class="dot {% if xray.state == 'running' %}dot-ok{% elif xray.state == 'starting' %}dot-warn{% else %}dot-bad{% endif %}"></span>
+      {{ xray.state|capitalize }}
+    </span>
+    <span class="stat-sub">{{ xray_version }}</span>
+  </article>
+
+  <article class="card stat">
+    <span class="stat-label">Accounts</span>
+    <span class="stat-value">{{ stats.total }}</span>
+    <span class="stat-sub">{{ stats.active }} active · {{ stats.disabled }} disabled · {{ stats.expired }} expired</span>
+  </article>
+
+  <article class="card stat">
+    <span class="stat-label">TCP Proxy</span>
+    <span class="stat-value">
+      {% if endpoint.available %}
+        <span class="dot dot-ok"></span> Ready
+      {% else %}
+        <span class="dot dot-warn"></span> Not configured
+      {% endif %}
+    </span>
+    <span class="stat-sub">{{ endpoint.display }}</span>
+  </article>
+
+  <article class="card stat">
+    <span class="stat-label">Uptime</span>
+    <span class="stat-value">{{ uptime }}</span>
+    <span class="stat-sub">Region: {{ railway.replica_region or 'local' }}</span>
+  </article>
+</section>
+
+<section class="grid grid-2">
+  <article class="card">
+    <header class="card-head">
+      <h2>Server status</h2>
+      <a class="btn btn-ghost btn-sm" href="/server">Details</a>
+    </header>
+    <dl class="kv">
+      <dt>Xray state</dt><dd>{{ xray.state }}{% if xray.pid %} (pid {{ xray.pid }}){% endif %}</dd>
+      <dt>Xray version</dt><dd>{{ xray_version }}</dd>
+      <dt>Xray restarts</dt><dd>{{ xray.restarts }}</dd>
+      <dt>Internal VPN port</dt><dd><code>{{ settings.xray_port }}</code></dd>
+      <dt>External VPN host</dt><dd><code>{{ endpoint.host or 'not configured' }}</code></dd>
+      <dt>External VPN port</dt><dd><code>{{ endpoint.port or 'not configured' }}</code></dd>
+      <dt>Deployment</dt><dd><code>{{ railway.short_deployment_id or 'local' }}</code></dd>
+      <dt>Region</dt><dd>{{ railway.replica_region or 'local' }}</dd>
+    </dl>
+  </article>
+
+  <article class="card">
+    <header class="card-head">
+      <h2>System</h2>
+      <button class="btn btn-ghost btn-sm" type="button" data-tool="resync">Re-apply config</button>
+    </header>
+    <dl class="kv">
+      <dt>CPU</dt>
+      <dd>{% if system.cpu_percent is not none %}{{ system.cpu_percent }}%{% else %}sampling…{% endif %}</dd>
+      <dt>Memory</dt><dd>{{ system.memory_display }} ({{ system.memory.percent or '?' }}%)</dd>
+      <dt>Volume</dt><dd>{{ system.disk_display }} ({{ system.disk.percent or '?' }}%)</dd>
+      <dt>Database</dt>
+      <dd>{% if database.ok %}ok · schema v{{ database.schema_version }}{% else %}error{% endif %}</dd>
+      <dt>Application</dt><dd>RailGate v{{ app_version }} ({{ settings.app_env }})</dd>
+      <dt>Fallback</dt>
+      <dd>
+        {% if fallback.available %}enabled · <code>{{ ws_path }}</code>
+        {% else %}unavailable{% endif %}
+      </dd>
+    </dl>
+  </article>
+</section>
+
+<section class="card">
+  <header class="card-head">
+    <h2>Recent activity</h2>
+    <a class="btn btn-ghost btn-sm" href="/logs">All logs</a>
+  </header>
+  {% if events %}
+  <ul class="event-list">
+    {% for event in events %}
+    <li class="event event-{{ event.level }}">
+      <span class="event-time">{{ event.ts }}</span>
+      <span class="badge badge-{{ event.level }}">{{ event.category }}</span>
+      <span class="event-message">{{ event.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No events recorded yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <header class="card-head"><h2>Quick start</h2></header>
+  <ol class="steps">
+    <li>Create an account on the <a href="/users/new">Users → Create</a> page.</li>
+    <li>Open the credential page and scan the QR code with v2rayNG, Hiddify or NekoBox.</li>
+    <li>Enable VPN mode in the Android client to route all apps through the gateway.</li>
+    <li>From a shell (<code>railway ssh</code>) the same thing is <code>vpnctl add myphone --days 30</code>.</li>
+  </ol>
+</section>
+
+{% endblock %}

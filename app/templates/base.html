@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ settings.app_name }}{% endblock %}</title>
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/theme.js"></script>
+</head>
+<body class="{% block body_class %}app{% endblock %}">
+
+{% if session %}
+<a class="skip-link" href="#main">Skip to content</a>
+
+<input type="checkbox" id="nav-toggle" class="nav-toggle-input" hidden>
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">RG</span>
+    <span class="brand-text">
+      <strong>RailGate</strong>
+      <small>v{{ app_version }}</small>
+    </span>
+  </div>
+
+  <nav class="nav" aria-label="Main">
+    <a class="nav-item {% if active_page == 'dashboard' %}is-active{% endif %}" href="/dashboard">
+      <span class="nav-icon" aria-hidden="true">■</span> Dashboard
+    </a>
+    <a class="nav-item {% if active_page == 'users' %}is-active{% endif %}" href="/users">
+      <span class="nav-icon" aria-hidden="true">◆</span> Users
+    </a>
+    <a class="nav-item {% if active_page == 'server' %}is-active{% endif %}" href="/server">
+      <span class="nav-icon" aria-hidden="true">▲</span> Server
+    </a>
+    <a class="nav-item {% if active_page == 'tools' %}is-active{% endif %}" href="/tools">
+      <span class="nav-icon" aria-hidden="true">✦</span> Tools
+    </a>
+    <a class="nav-item {% if active_page == 'settings' %}is-active{% endif %}" href="/settings">
+      <span class="nav-icon" aria-hidden="true">✱</span> Settings
+    </a>
+    <a class="nav-item {% if active_page == 'logs' %}is-active{% endif %}" href="/logs">
+      <span class="nav-icon" aria-hidden="true">≡</span> Logs
+    </a>
+  </nav>
+
+  <form class="nav-footer" method="post" action="/logout">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-ghost btn-block">Log out</button>
+  </form>
+</aside>
+
+<div class="shell">
+  <header class="topbar">
+    <label class="nav-toggle" for="nav-toggle" aria-label="Toggle navigation">
+      <span aria-hidden="true">☰</span>
+    </label>
+    <h1 class="topbar-title">{% block heading %}{{ settings.app_name }}{% endblock %}</h1>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-ghost btn-icon" data-theme-toggle title="Toggle light / dark theme">
+        <span aria-hidden="true">◐</span><span class="sr-only">Toggle theme</span>
+      </button>
+      <span class="badge badge-muted">{{ session.username }}</span>
+    </div>
+  </header>
+
+  <main class="content" id="main">
+    {% if notice %}<div class="alert alert-success" role="status">{{ notice }}</div>{% endif %}
+    {% if error %}<div class="alert alert-error" role="alert">{{ error }}</div>{% endif %}
+    <div id="toast" class="toast" hidden></div>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>{{ settings.app_name }} · RailGate v{{ app_version }}</span>
+    <span>Shell access: <code>railway ssh</code> · CLI: <code>vpnctl</code></span>
+  </footer>
+</div>
+{% else %}
+  {% block anon_content %}{% endblock %}
+{% endif %}
+
+<script src="/static/js/app.js" defer></script>
+</body>
+</html>

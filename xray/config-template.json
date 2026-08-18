@@ -1,0 +1,167 @@
+{
+  "_comment": [
+    "RailGate Xray-core configuration template.",
+    "Validated against Xray-core v26.3.27.",
+    "",
+    "This file is a TEMPLATE. app/xray_manager.py loads it and fills in, by",
+    "inbound tag: listening ports, the REALITY key material, the SNI/target and",
+    "the client list built from the SQLite database. The rendered result is",
+    "written to $DATA_DIR/xray/config.json and validated with `xray run -test`",
+    "before it is ever activated.",
+    "",
+    "Safe to edit: log, dns, policy, outbounds and the routing rules.",
+    "Do NOT rename the inbound tags 'vless-reality', 'vless-ws-backend' or",
+    "'api' - the manager looks them up by tag."
+  ],
+
+  "log": {
+    "loglevel": "warning",
+    "dnsLog": false,
+    "access": "none"
+  },
+
+  "api": {
+    "tag": "api",
+    "listen": "127.0.0.1:10085",
+    "services": ["HandlerService", "StatsService"]
+  },
+
+  "stats": {},
+
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "handshake": 4,
+        "connIdle": 300,
+        "uplinkOnly": 2,
+        "downlinkOnly": 2
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true
+    }
+  },
+
+  "dns": {
+    "servers": ["1.1.1.1", "8.8.8.8", "localhost"],
+    "queryStrategy": "UseIP",
+    "disableCache": false
+  },
+
+  "inbounds": [
+    {
+      "tag": "vless-reality",
+      "listen": "0.0.0.0",
+      "port": 2443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "www.microsoft.com:443",
+          "xver": 0,
+          "serverNames": ["www.microsoft.com"],
+          "privateKey": "",
+          "shortIds": [""]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "vless-ws-backend",
+      "listen": "127.0.0.1",
+      "port": 2444,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "none"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": false
+      }
+    }
+  ],
+
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "AsIs"
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": {
+        "response": {
+          "type": "none"
+        }
+      }
+    }
+  ],
+
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "_comment": "Management API stays internal.",
+        "type": "field",
+        "inboundTag": ["api"],
+        "outboundTag": "api"
+      },
+      {
+        "_comment": "Hard security boundary: VPN users must never reach the container's own loopback services (admin panel, Xray API) or Railway's private network.",
+        "type": "field",
+        "ip": [
+          "0.0.0.0/8",
+          "10.0.0.0/8",
+          "100.64.0.0/10",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "::1/128",
+          "fc00::/7",
+          "fe80::/10"
+        ],
+        "outboundTag": "block"
+      },
+      {
+        "_comment": "Railway's internal service discovery domain.",
+        "type": "field",
+        "domain": ["domain:railway.internal"],
+        "outboundTag": "block"
+      },
+      {
+        "_comment": "Replaced by the manager when BLOCK_BITTORRENT is enabled.",
+        "type": "field",
+        "protocol": ["bittorrent"],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "network": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

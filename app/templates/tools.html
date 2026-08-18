@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Tools · {{ settings.app_name }}{% endblock %}
+{% block heading %}Admin tools{% endblock %}
+
+{% block content %}
+<div class="alert alert-info" role="note">
+  These are fixed, predefined actions. There is deliberately no web shell — for a
+  real terminal use <code>railway ssh</code> (or <code>railway ssh --session</code>
+  for a persistent tmux session) and the <code>vpnctl</code> command.
+</div>
+
+<section class="card">
+  <header class="card-head"><h2>Actions</h2></header>
+  <div class="tool-grid">
+    {% for key, label in actions %}
+    <button class="btn btn-ghost tool-btn" type="button" data-tool="{{ key }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+  <pre class="output" id="tool-output" hidden></pre>
+</section>
+
+<section class="card">
+  <header class="card-head"><h2>Backups</h2></header>
+  {% if backups %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>File</th><th>Size</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for backup in backups %}
+        <tr>
+          <td class="mono small">{{ backup.filename }}</td>
+          <td class="small">{{ backup.size_bytes }} bytes</td>
+          <td class="muted small">{{ backup.modified_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted small">
+    Backups live on the volume at <code>{{ settings.data_dir }}/backups</code>. They are
+    never downloadable over HTTP — copy them out with <code>railway ssh</code>.
+  </p>
+  {% else %}
+  <p class="muted">No backups yet. Use “Create database backup” above or run <code>vpnctl backup</code>.</p>
+  {% endif %}
+</section>
+{% endblock %}

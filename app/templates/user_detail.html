@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ user.username }} · {{ settings.app_name }}{% endblock %}
+{% block heading %}{{ user.username }}{% endblock %}
+
+{% block content %}
+{% set status = user.status() %}
+
+<section class="toolbar">
+  <div class="toolbar-stats">
+    <span class="badge badge-{{ 'ok' if status == 'active' else ('warn' if status == 'expired' else 'muted') }}">{{ status }}</span>
+    <span class="badge badge-muted">created {{ user.created_at and user.created_at.strftime('%Y-%m-%d') or '-' }}</span>
+    <span class="badge badge-muted">expires {{ user.expires_display }}</span>
+  </div>
+  <div class="row-actions">
+    <a class="btn btn-ghost" href="/users">Back to users</a>
+    <button class="btn btn-ghost" type="button" data-action="renew"
+            data-user-id="{{ user.id }}" data-username="{{ user.username }}">Renew</button>
+    {% if user.enabled %}
+    <button class="btn btn-ghost" type="button" data-action="disable"
+            data-user-id="{{ user.id }}" data-username="{{ user.username }}">Disable user</button>
+    {% else %}
+    <button class="btn btn-ghost" type="button" data-action="enable"
+            data-user-id="{{ user.id }}" data-username="{{ user.username }}">Enable user</button>
+    {% endif %}
+    <button class="btn btn-ghost" type="button" data-action="regenerate"
+            data-user-id="{{ user.id }}" data-username="{{ user.username }}">Regenerate UUID</button>
+    <button class="btn btn-danger" type="button" data-action="delete"
+            data-user-id="{{ user.id }}" data-username="{{ user.username }}"
+            data-redirect="/users">Delete user</button>
+  </div>
+</section>
+
+{% if status != 'active' %}
+<div class="alert alert-warn" role="status">
+  This account is <strong>{{ status }}</strong>, so it is not present in the running Xray
+  configuration and cannot connect. The link below stays valid and starts working
+  again as soon as the account is enabled{% if status == 'expired' %} and renewed{% endif %}.
+</div>
+{% endif %}
+
+{% for key, link in [('primary', bundle.primary), ('fallback', bundle.fallback)] %}
+<section class="card">
+  <header class="card-head">
+    <h2>{{ link.label }}</h2>
+    {% if key == 'primary' %}
+      <span class="badge badge-ok">Primary</span>
+    {% else %}
+      <span class="badge badge-muted">Fallback</span>
+    {% endif %}
+  </header>
+
+  {% if link.available %}
+  <div class="credential">
+    <dl class="kv kv-mono">
+      {% for label, value in link.fields.items() %}
+      <dt>{{ label }}</dt><dd class="wrap">{{ value }}</dd>
+      {% endfor %}
+    </dl>
+
+    <div class="uri-box">
+      <code class="uri" id="uri-{{ key }}">{{ link.uri }}</code>
+    </div>
+
+    <div class="row-actions">
+      <button class="btn btn-primary" type="button"
+              data-action="copy-text" data-copy-target="uri-{{ key }}">Copy VLESS link</button>
+      <button class="btn btn-ghost" type="button"
+              data-action="toggle-qr" data-qr-target="qr-{{ key }}">Show QR code</button>
+      <a class="btn btn-ghost" href="/api/users/{{ user.id }}/config?transport={{ key }}">Download config</a>
+    </div>
+
+    <figure class="qr" id="qr-{{ key }}" hidden>
+      <img src="/api/users/{{ user.id }}/qr?transport={{ key }}"
+           alt="QR code for the {{ link.label }} link" width="260" height="260">
+      <figcaption class="muted small">
+        Scan in v2rayNG, Hiddify or NekoBox — “Import from QR code”.
+      </figcaption>
+    </figure>
+  </div>
+  {% else %}
+  <div class="alert alert-warn" role="status">{{ link.reason }}</div>
+  {% if key == 'primary' %}
+    <dl class="kv kv-mono">
+      {% for label, value in link.fields.items() %}
+      <dt>{{ label }}</dt><dd class="wrap">{{ value }}</dd>
+      {% endfor %}
+    </dl>
+  {% endif %}
+  {% endif %}
+</section>
+{% endfor %}
+
+<section class="card">
+  <header class="card-head"><h2>Account</h2></header>
+  <dl class="kv kv-mono">
+    <dt>Username</dt><dd>{{ user.username }}</dd>
+    <dt>UUID</dt><dd class="wrap">{{ user.uuid }}</dd>
+    <dt>Status</dt><dd>{{ status }}</dd>
+    <dt>Created</dt><dd>{{ user.created_at }}</dd>
+    <dt>Expires</dt><dd>{{ user.expires_display }} ({{ user.remaining_display }})</dd>
+    <dt>Notes</dt><dd class="wrap">{{ user.notes or '—' }}</dd>
+  </dl>
+</section>
+{% endblock %}

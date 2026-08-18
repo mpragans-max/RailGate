@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Server · {{ settings.app_name }}{% endblock %}
+{% block heading %}Server information{% endblock %}
+
+{% block content %}
+<section class="grid grid-2">
+  <article class="card">
+    <header class="card-head"><h2>Railway</h2></header>
+    <dl class="kv kv-mono">
+      <dt>Project</dt><dd>{{ railway.project_name or '—' }}</dd>
+      <dt>Service</dt><dd>{{ railway.service_name or '—' }}</dd>
+      <dt>Environment</dt><dd>{{ railway.environment_name or '—' }}</dd>
+      <dt>Region</dt><dd>{{ railway.replica_region or '—' }}</dd>
+      <dt>Deployment</dt>
+      <dd class="wrap">
+        <span data-copy-value="{{ railway.deployment_id }}">{{ railway.deployment_id or '—' }}</span>
+        {% if railway.deployment_id %}<button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ railway.deployment_id }}">Copy</button>{% endif %}
+      </dd>
+      <dt>Public web domain</dt>
+      <dd class="wrap">
+        {{ railway.public_domain or 'not generated' }}
+        {% if railway.public_domain %}<button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ railway.public_domain }}">Copy</button>{% endif %}
+      </dd>
+      <dt>Private domain</dt><dd class="wrap">{{ railway.private_domain or '—' }}</dd>
+    </dl>
+  </article>
+
+  <article class="card">
+    <header class="card-head"><h2>VPN endpoint</h2></header>
+    <dl class="kv kv-mono">
+      <dt>Internal Xray port</dt><dd>{{ settings.xray_port }}</dd>
+      <dt>VPN TCP host</dt>
+      <dd class="wrap">
+        {{ endpoint.host or 'NOT CONFIGURED' }}
+        {% if endpoint.host %}<button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ endpoint.host }}">Copy</button>{% endif %}
+      </dd>
+      <dt>VPN TCP port</dt>
+      <dd>
+        {{ endpoint.port or 'NOT CONFIGURED' }}
+        {% if endpoint.port %}<button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ endpoint.port }}">Copy</button>{% endif %}
+      </dd>
+      <dt>Host source</dt><dd>{{ endpoint.host_source }}</dd>
+      <dt>Port source</dt><dd>{{ endpoint.port_source }}</dd>
+      <dt>Railway internal target</dt><dd>{{ railway.tcp_application_port or '—' }}</dd>
+    </dl>
+    {% if not endpoint.available %}
+    <div class="alert alert-warn" role="status">{{ tcp_hint }}</div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="grid grid-2">
+  <article class="card">
+    <header class="card-head"><h2>Xray</h2></header>
+    <dl class="kv kv-mono">
+      <dt>State</dt>
+      <dd>
+        <span class="dot {% if xray.state == 'running' %}dot-ok{% elif xray.state == 'starting' %}dot-warn{% else %}dot-bad{% endif %}"></span>
+        {{ xray.state }}
+      </dd>
+      <dt>Version</dt><dd class="wrap">{{ xray_version }}</dd>
+      <dt>PID</dt><dd>{{ xray.pid or '—' }}</dd>
+      <dt>Restarts</dt><dd>{{ xray.restarts }}</dd>
+      <dt>Listening</dt><dd>{{ 'yes' if xray.listening else 'no' }}</dd>
+      <dt>REALITY SNI</dt><dd class="wrap">{{ settings.reality_server_name }}</dd>
+      <dt>REALITY target</dt><dd class="wrap">{{ settings.reality_destination }}</dd>
+      <dt>REALITY public key</dt>
+      <dd class="wrap">
+        {{ reality_public_key or '—' }}
+        {% if reality_public_key %}<button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ reality_public_key }}">Copy</button>{% endif %}
+      </dd>
+      <dt>Short ID</dt><dd class="wrap">{{ reality_short_id or '—' }}</dd>
+      <dt>Fingerprint</dt><dd>{{ settings.reality_fingerprint }}</dd>
+    </dl>
+    <p class="muted small">The REALITY private key stays on the volume and is never displayed, logged or served.</p>
+  </article>
+
+  <article class="card">
+    <header class="card-head"><h2>Application</h2></header>
+    <dl class="kv kv-mono">
+      <dt>Application version</dt><dd>RailGate v{{ app_version }}</dd>
+      <dt>Environment</dt><dd>{{ settings.app_env }}</dd>
+      <dt>Uptime</dt><dd>{{ uptime }}</dd>
+      <dt>Admin HTTP port</dt><dd>{{ settings.port }}</dd>
+      <dt>Database</dt>
+      <dd>{% if database.ok %}ok · schema v{{ database.schema_version }} · {{ database.user_count }} account(s){% else %}{{ database.error }}{% endif %}</dd>
+      <dt>Volume</dt><dd>{{ settings.data_dir }} ({{ 'writable' if volume_writable else 'NOT WRITABLE' }})</dd>
+      <dt>Outbound IP</dt>
+      <dd class="wrap">
+        {% if outbound.ip %}
+          {{ outbound.ip }}
+          <button class="btn btn-ghost btn-xs" type="button" data-action="copy-value" data-value="{{ outbound.ip }}">Copy</button>
+        {% else %}
+          unavailable{% if outbound.error %} ({{ outbound.error }}){% endif %}
+        {% endif %}
+      </dd>
+      <dt>WebSocket fallback</dt>
+      <dd class="wrap">
+        {% if fallback.available %}
+          https://{{ fallback.host }}{{ ws_path }}
+        {% else %}
+          {{ fallback.reason }}
+        {% endif %}
+      </dd>
+    </dl>
+    <p class="muted small">
+      Railway's outbound address depends on your plan and configuration. Do not
+      assume it is static unless Static Outbound IP is enabled for the service.
+    </p>
+  </article>
+</section>
+{% endblock %}

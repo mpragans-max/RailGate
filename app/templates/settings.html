@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Settings · {{ settings.app_name }}{% endblock %}
+{% block heading %}Settings{% endblock %}
+
+{% block content %}
+<div class="alert alert-info" role="note">
+  Settings are supplied through environment variables so the deployment stays
+  reproducible. Change them in Railway → your service → <strong>Variables</strong>,
+  then redeploy. This page shows the values currently in effect.
+</div>
+
+<section class="grid grid-2">
+  <article class="card">
+    <header class="card-head"><h2>Application</h2></header>
+    <dl class="kv kv-mono">
+      <dt>APP_NAME</dt><dd class="wrap">{{ settings.app_name }}</dd>
+      <dt>APP_ENV</dt><dd>{{ settings.app_env }}</dd>
+      <dt>LOG_LEVEL</dt><dd>{{ settings.log_level }}</dd>
+      <dt>ADMIN_USERNAME</dt><dd>{{ settings.admin_username }}</dd>
+      <dt>ADMIN_PASSWORD</dt><dd>set (never displayed)</dd>
+      <dt>ADMIN_SESSION_SECRET</dt>
+      <dd>{% if settings.session_secret_is_ephemeral %}<span class="badge badge-warn">ephemeral</span> regenerated each restart{% else %}persistent{% endif %}</dd>
+      <dt>Session lifetime</dt><dd>{{ settings.admin_session_ttl_hours }} h</dd>
+      <dt>VPN_DEFAULT_EXPIRY_DAYS</dt><dd>{{ settings.vpn_default_expiry_days }} {% if settings.vpn_default_expiry_days == 0 %}(never){% endif %}</dd>
+    </dl>
+  </article>
+
+  <article class="card">
+    <header class="card-head"><h2>Network</h2></header>
+    <dl class="kv kv-mono">
+      <dt>PORT (admin HTTP)</dt><dd>{{ settings.port }}</dd>
+      <dt>XRAY_PORT (VPN)</dt><dd>{{ settings.xray_port }}</dd>
+      <dt>XRAY_WS_BACKEND_PORT</dt><dd>{{ settings.xray_ws_backend_port }} (loopback only)</dd>
+      <dt>XRAY_API_PORT</dt><dd>{{ settings.xray_api_port }} (loopback only)</dd>
+      <dt>PUBLIC_PROXY_HOST</dt><dd class="wrap">{{ settings.public_proxy_host or '(unset — using Railway)' }}</dd>
+      <dt>PUBLIC_PROXY_PORT</dt><dd>{{ settings.public_proxy_port or '(unset — using Railway)' }}</dd>
+      <dt>Effective endpoint</dt><dd class="wrap">{{ endpoint.display }}</dd>
+      <dt>URI_NETWORK_ALIAS</dt><dd>{{ settings.uri_network_alias }}</dd>
+    </dl>
+  </article>
+</section>
+
+<section class="grid grid-2">
+  <article class="card">
+    <header class="card-head"><h2>REALITY</h2></header>
+    <dl class="kv kv-mono">
+      <dt>REALITY_SERVER_NAME</dt><dd class="wrap">{{ settings.reality_server_name }}</dd>
+      <dt>REALITY_DESTINATION</dt><dd class="wrap">{{ settings.reality_destination }}</dd>
+      <dt>REALITY_FINGERPRINT</dt><dd>{{ settings.reality_fingerprint }}</dd>
+      <dt>Public key</dt><dd class="wrap">{{ reality_public_key or 'not generated' }}</dd>
+      <dt>Short ID</dt><dd class="wrap">{{ reality_short_id or 'not generated' }}</dd>
+      <dt>Private key</dt><dd>stored at <code>{{ settings.data_dir }}/xray/reality-private-key</code> (never shown)</dd>
+    </dl>
+    <p class="muted small">
+      Changing the SNI or destination re-renders and restarts Xray on the next apply.
+      Rotating the key pair invalidates every issued link, so it is intentionally a
+      manual operation: delete the key files on the volume and restart.
+    </p>
+  </article>
+
+  <article class="card">
+    <header class="card-head"><h2>Fallback &amp; routing</h2></header>
+    <dl class="kv kv-mono">
+      <dt>ENABLE_WS_FALLBACK</dt><dd>{{ 'true' if settings.enable_ws_fallback else 'false' }}</dd>
+      <dt>Fallback path</dt><dd class="wrap">{{ ws_path or '—' }}</dd>
+      <dt>Fallback URL</dt>
+      <dd class="wrap">{% if fallback.available %}https://{{ fallback.host }}{{ ws_path }}{% else %}{{ fallback.reason }}{% endif %}</dd>
+      <dt>BLOCK_BITTORRENT</dt><dd>{{ 'true' if settings.block_bittorrent else 'false' }}</dd>
+      <dt>Private networks</dt><dd>always blocked</dd>
+      <dt>EXPIRY_CHECK_INTERVAL</dt><dd>{{ settings.expiry_check_interval }} s</dd>
+      <dt>DATA_DIR</dt><dd class="wrap">{{ settings.data_dir }}</dd>
+    </dl>
+  </article>
+</section>
+
+<section class="card">
+  <header class="card-head"><h2>Session control</h2></header>
+  <p class="muted">
+    Signing out everywhere invalidates all dashboard sessions immediately,
+    including this one.
+  </p>
+  <button class="btn btn-danger" type="button" data-action="logout-all">Sign out of all sessions</button>
+</section>
+{% endblock %}

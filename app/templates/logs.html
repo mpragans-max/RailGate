@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Logs · {{ settings.app_name }}{% endblock %}
+{% block heading %}Logs{% endblock %}
+
+{% block content %}
+<div class="alert alert-info" role="note">
+  Application events only. RailGate never records browsing activity, destinations
+  or traffic contents — and passwords, keys and session material are scrubbed
+  before anything is written.
+</div>
+
+<section class="card">
+  <header class="card-head">
+    <h2>Application events</h2>
+    <span class="badge badge-muted">{{ events|length }} shown</span>
+  </header>
+  {% if events %}
+  <ul class="event-list event-list-full">
+    {% for event in events %}
+    <li class="event event-{{ event.level }}">
+      <span class="event-time">{{ event.ts }}</span>
+      <span class="badge badge-{{ event.level }}">{{ event.category }}</span>
+      <span class="event-message">{{ event.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No events recorded yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <header class="card-head">
+    <h2>Xray service log</h2>
+    <span class="badge badge-muted">last {{ xray_log|length }} lines</span>
+  </header>
+  {% if xray_log %}
+  <pre class="output">{% for line in xray_log %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p class="muted">
+    No Xray log lines yet. Raise verbosity with <code>XRAY_LOG_LEVEL=info</code>
+    if you need more detail.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

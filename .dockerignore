@@ -1,0 +1,45 @@
+# Keep the build context small and never ship secrets or local state.
+.git
+.gitignore
+.github
+.venv
+venv
+env
+
+# Local persistent state / secrets
+data/
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+backups/
+sessions/
+logs/
+*.log
+xray/generated/*
+!xray/generated/.gitkeep
+reality-private-key
+reality-public-key
+short-id
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Docs & dev-only files not needed at runtime
+docker-compose.yml
+*.md
+!README.md

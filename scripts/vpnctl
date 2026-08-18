@@ -1,0 +1,700 @@
+#!/usr/bin/env python3
+"""vpnctl — RailGate account management from the container shell.
+
+Reach it with Railway's own authenticated shell:
+
+    railway ssh
+    vpnctl                      # interactive menu
+    vpnctl add myphone --days 30
+    vpnctl show myphone
+
+It talks to the same database and the same apply pipeline as the web panel, so
+the two can never disagree. Running it while the web app is down is fine.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import secrets
+import sys
+from pathlib import Path
+
+sys.path.insert(0, os.environ.get("APP_ROOT", "/opt/railgate"))
+
+from app import APP_VERSION  # noqa: E402
+from app.backup import BackupError, create_backup, inspect_backup, list_backups, restore_backup  # noqa: E402
+from app.config import ConfigError, Settings, load_settings  # noqa: E402
+from app.credentials import build_credentials, qr_ascii  # noqa: E402
+from app.database import init_db  # noqa: E402
+from app.diagnostics import collect, render_text  # noqa: E402
+from app.models import UserError, list_users, user_stats  # noqa: E402
+from app.railway_info import TCP_PROXY_SETUP_HINT, detect_railway, resolve_public_endpoint  # noqa: E402
+from app.service import (  # noqa: E402
+    create_account,
+    delete_account,
+    find_account,
+    regenerate_account_uuid,
+    renew_account,
+    resolve_expiry,
+    set_account_enabled,
+    sync,
+)
+from app.util import format_uptime  # noqa: E402
+from app.xray_manager import (  # noqa: E402
+    ensure_ws_path,
+    load_reality_keys,
+    render_config,
+    restart_xray,
+    validate_config,
+    xray_status,
+    xray_version,
+)
+
+WIDTH = 60
+USE_COLOUR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _c(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if USE_COLOUR else text
+
+
+def bold(text: str) -> str:
+    return _c(text, "1")
+
+
+def green(text: str) -> str:
+    return _c(text, "32")
+
+
+def yellow(text: str) -> str:
+    return _c(text, "33")
+
+
+def red(text: str) -> str:
+    return _c(text, "31")
+
+
+def cyan(text: str) -> str:
+    return _c(text, "36")
+
+
+def banner(title: str = "Railway Personal Gateway") -> None:
+    print()
+    print(cyan("=" * WIDTH))
+    print(bold(f" {title}"))
+    print(cyan("=" * WIDTH))
+
+
+def field(label: str, value: object, width: int = 12) -> None:
+    print(f" {label.ljust(width)}: {value}")
+
+
+def ok(message: str) -> None:
+    print(green(f"  ✔ {message}"))
+
+
+def warn(message: str) -> None:
+    print(yellow(f"  ! {message}"))
+
+
+def fail(message: str) -> None:
+    print(red(f"  ✖ {message}"), file=sys.stderr)
+
+
+def status_colour(status: str) -> str:
+    return {"active": green("Active"), "disabled": yellow("Disabled")}.get(status, red("Expired"))
+
+
+# --------------------------------------------------------------------------- #
+# settings bootstrap
+# --------------------------------------------------------------------------- #
+def get_cli_settings() -> Settings:
+    """Load settings; the CLI does not authenticate, so a missing admin
+    password must not stop an operator who already has shell access."""
+    try:
+        return load_settings()
+    except ConfigError as exc:
+        if "ADMIN_PASSWORD" in str(exc):
+            os.environ["ADMIN_PASSWORD"] = secrets.token_urlsafe(24)
+            try:
+                settings = load_settings()
+            except ConfigError as inner:
+                fail(str(inner))
+                raise SystemExit(2) from inner
+            warn("ADMIN_PASSWORD is not set — the web dashboard will refuse to start.")
+            return settings
+        fail(str(exc))
+        raise SystemExit(2) from exc
+
+
+def report_apply(result) -> None:
+    if result.ok:
+        ok(result.message or "Xray configuration applied.")
+    else:
+        fail(result.message or "Applying the Xray configuration failed.")
+        if result.validation_output:
+            print(result.validation_output[-800:], file=sys.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# rendering
+# --------------------------------------------------------------------------- #
+def print_credentials(settings: Settings, user, show_qr: bool = False) -> None:
+    bundle = build_credentials(settings, user)
+    banner()
+    field("User", bold(user.username))
+    field("Status", status_colour(user.status()))
+    field("Expires", user.expires_display + (f"  ({user.remaining_display})" if user.expires_at else ""))
+    field("Created", user.created_at)
+    if user.notes:
+        field("Notes", user.notes)
+    print()
+
+    for link in (bundle.primary, bundle.fallback):
+        print(bold(f" {link.label}"))
+        print(cyan(" " + "-" * (WIDTH - 2)))
+        if link.available:
+            for label, value in link.fields.items():
+                field(label, value, width=18)
+            print()
+            print(bold(" Link:"))
+            print(f" {link.uri}")
+        else:
+            warn(link.reason)
+        print()
+
+    if show_qr:
+        if bundle.best_uri:
+            print(bold(" QR code (scan with v2rayNG / Hiddify / NekoBox):"))
+            print(qr_ascii(bundle.best_uri))
+        else:
+            warn("No usable link yet, so there is nothing to encode as a QR code.")
+
+
+def print_user_table(settings: Settings) -> None:
+    users = list_users(settings.db_path)
+    stats = user_stats(settings.db_path)
+    banner("Accounts")
+    if not users:
+        warn("No accounts yet. Create one with:  vpnctl add <username>")
+        print()
+        return
+
+    name_width = max(max(len(u.username) for u in users), 8)
+    print(
+        f" {'USERNAME'.ljust(name_width)}  {'STATUS'.ljust(9)} {'CREATED'.ljust(11)} "
+        f"{'EXPIRES'.ljust(12)} REMAINING"
+    )
+    print(cyan(" " + "-" * (WIDTH + name_width)))
+    for user in users:
+        created = user.created_at.strftime("%Y-%m-%d") if user.created_at else "-"
+        expires = user.expires_at.strftime("%Y-%m-%d") if user.expires_at else "never"
+        print(
+            f" {user.username.ljust(name_width)}  {status_colour(user.status()).ljust(9 + (9 if USE_COLOUR else 0))} "
+            f"{created.ljust(11)} {expires.ljust(12)} {user.remaining_display}"
+        )
+    print()
+    field("Total", stats["total"], width=10)
+    field("Active", stats["active"], width=10)
+    field("Disabled", stats["disabled"], width=10)
+    field("Expired", stats["expired"], width=10)
+    print()
+
+
+def print_status(settings: Settings) -> None:
+    status = xray_status(settings)
+    railway = detect_railway()
+    endpoint = resolve_public_endpoint(settings, railway)
+    stats = user_stats(settings.db_path)
+
+    banner("Server status")
+    field("App", f"RailGate {APP_VERSION} ({settings.app_env})", width=16)
+    field("Xray", f"{status.state} — {status.version}", width=16)
+    if status.uptime_seconds is not None:
+        field("Xray uptime", format_uptime(status.uptime_seconds), width=16)
+    field("Xray restarts", status.restarts, width=16)
+    field("Internal port", settings.xray_port, width=16)
+    field("Public host", endpoint.host or red("NOT CONFIGURED"), width=16)
+    field("Public port", endpoint.port or red("NOT CONFIGURED"), width=16)
+    field("Project", railway.project_name or "-", width=16)
+    field("Service", railway.service_name or "-", width=16)
+    field("Region", railway.replica_region or "-", width=16)
+    field("Deployment", railway.short_deployment_id or "-", width=16)
+    field("Accounts", f"{stats['total']} total / {stats['active']} active", width=16)
+    print()
+    if not endpoint.available:
+        warn("TCP Proxy: NOT CONFIGURED")
+        print(f"   {TCP_PROXY_SETUP_HINT.format(port=settings.xray_port)}")
+        print()
+
+
+# --------------------------------------------------------------------------- #
+# commands
+# --------------------------------------------------------------------------- #
+def cmd_add(settings: Settings, args) -> int:
+    try:
+        expires_at = resolve_expiry(
+            days=args.days,
+            expire=args.expire,
+            default_days=settings.vpn_default_expiry_days,
+        )
+    except ValueError as exc:
+        fail(str(exc))
+        return 1
+    try:
+        result = create_account(settings, args.username, expires_at=expires_at, notes=args.notes or "")
+    except UserError as exc:
+        fail(str(exc))
+        return 1
+    ok(f"Account '{result.user.username}' created.")
+    report_apply(result.apply_result)
+    print_credentials(settings, result.user, show_qr=args.qr)
+    return 0
+
+
+def cmd_remove(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    if not args.yes:
+        answer = input(f" Delete '{user.username}' permanently? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            warn("Cancelled.")
+            return 1
+    result = delete_account(settings, user.id)
+    ok(f"Account '{user.username}' deleted.")
+    report_apply(result.apply_result)
+    return 0
+
+
+def cmd_enable(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    try:
+        result = set_account_enabled(settings, user.id, True)
+    except UserError as exc:
+        fail(str(exc))
+        return 1
+    ok(f"Account '{user.username}' enabled.")
+    report_apply(result.apply_result)
+    return 0
+
+
+def cmd_disable(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    result = set_account_enabled(settings, user.id, False)
+    ok(f"Account '{user.username}' disabled.")
+    report_apply(result.apply_result)
+    return 0
+
+
+def cmd_renew(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    try:
+        result = renew_account(settings, user.id, days=args.days, expire=args.expire)
+    except (UserError, ValueError) as exc:
+        fail(str(exc))
+        return 1
+    ok(f"Account '{user.username}' now expires: {result.user.expires_display}")
+    report_apply(result.apply_result)
+    return 0
+
+
+def cmd_regenerate(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    if not args.yes:
+        answer = input(
+            f" Regenerate the UUID for '{user.username}'? Existing links stop working. [y/N] "
+        ).strip().lower()
+        if answer not in {"y", "yes"}:
+            warn("Cancelled.")
+            return 1
+    result = regenerate_account_uuid(settings, user.id)
+    ok(f"New UUID issued for '{user.username}'.")
+    report_apply(result.apply_result)
+    print_credentials(settings, result.user)
+    return 0
+
+
+def cmd_list(settings: Settings, args) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps([u.as_dict() for u in list_users(settings.db_path)], indent=2))
+    else:
+        print_user_table(settings)
+    return 0
+
+
+def cmd_show(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    if getattr(args, "json", False):
+        print(json.dumps(build_credentials(settings, user).as_dict(), indent=2))
+    else:
+        print_credentials(settings, user, show_qr=getattr(args, "qr", False))
+    return 0
+
+
+def cmd_uri(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    bundle = build_credentials(settings, user)
+    link = bundle.fallback if args.fallback else bundle.primary
+    if not link.available:
+        fail(link.reason)
+        return 1
+    print(link.uri)
+    return 0
+
+
+def cmd_qr(settings: Settings, args) -> int:
+    user = find_account(settings, args.username)
+    bundle = build_credentials(settings, user)
+    link = bundle.fallback if args.fallback else bundle.primary
+    if not link.available:
+        fail(link.reason)
+        return 1
+    banner(f"{user.username} — {link.label}")
+    print(qr_ascii(link.uri))
+    print(f" {link.uri}\n")
+    return 0
+
+
+def cmd_status(settings: Settings, args) -> int:
+    print_status(settings)
+    return 0
+
+
+def cmd_xray_test(settings: Settings, args) -> int:
+    keys = load_reality_keys(settings)
+    if keys is None:
+        fail("REALITY keys have not been generated yet.")
+        return 1
+    users = [u for u in list_users(settings.db_path) if u.is_active()]
+    config = render_config(settings, users, keys, ensure_ws_path(settings))
+    valid, output = validate_config(settings, config)
+    banner("Xray configuration test")
+    field("Binary", xray_version(settings), width=14)
+    field("Accounts", f"{len(users)} active", width=14)
+    field("Result", green("VALID") if valid else red("INVALID"), width=14)
+    print()
+    print(output)
+    print()
+    return 0 if valid else 1
+
+
+def cmd_restart(settings: Settings, args) -> int:
+    banner("Restart Xray")
+    success, detail = restart_xray(settings)
+    (ok if success else fail)(detail)
+    return 0 if success else 1
+
+
+def cmd_resync(settings: Settings, args) -> int:
+    banner("Re-apply configuration")
+    report_apply(sync(settings, "vpnctl resync", force_restart=args.restart))
+    return 0
+
+
+def cmd_diagnose(settings: Settings, args) -> int:
+    print(render_text(collect(settings)))
+    return 0
+
+
+def cmd_backup(settings: Settings, args) -> int:
+    banner("Backup")
+    try:
+        result = create_backup(settings, label=args.label or "")
+    except BackupError as exc:
+        fail(str(exc))
+        return 1
+    ok(f"Backup written to {result.path}")
+    field("Size", f"{result.size_bytes} bytes", width=10)
+    field("Accounts", result.user_count, width=10)
+    print()
+    print(" Copy it off the container with:")
+    print(f"   railway ssh 'cat {result.path}' > {result.path.name}")
+    print()
+    return 0
+
+
+def cmd_restore(settings: Settings, args) -> int:
+    archive = Path(args.file)
+    banner("Restore")
+    try:
+        manifest = inspect_backup(archive)
+    except BackupError as exc:
+        fail(str(exc))
+        return 1
+    field("Archive", archive, width=14)
+    field("Created", manifest.get("created_at", "?"), width=14)
+    field("Accounts", manifest.get("user_count", "?"), width=14)
+    field("Contents", ", ".join(manifest.get("includes", [])), width=14)
+    print()
+
+    if not args.confirm:
+        warn("This would overwrite the live database and REALITY keys.")
+        print("   Re-run with --confirm to proceed.")
+        return 1
+    try:
+        result = restore_backup(settings, archive, confirm=True)
+    except BackupError as exc:
+        fail(str(exc))
+        return 1
+    ok(f"Restored: {', '.join(result['restored'])}")
+    if result["safety_backup"]:
+        field("Safety copy", result["safety_backup"], width=14)
+    init_db(settings.db_path, force=True)
+    report_apply(sync(settings, "restore", force_restart=True))
+    return 0
+
+
+def cmd_backups(settings: Settings, args) -> int:
+    banner("Backups")
+    entries = list_backups(settings)
+    if not entries:
+        warn("No backups yet. Create one with:  vpnctl backup")
+        return 0
+    for entry in entries:
+        print(f" {entry['modified_at']}  {entry['size_bytes']:>9} B  {entry['filename']}")
+    print()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# interactive menu
+# --------------------------------------------------------------------------- #
+MENU = [
+    ("1", "Create VPN account", "add"),
+    ("2", "Delete account", "remove"),
+    ("3", "Renew account", "renew"),
+    ("4", "Disable account", "disable"),
+    ("5", "Enable account", "enable"),
+    ("6", "List accounts", "list"),
+    ("7", "Show credential", "show"),
+    ("8", "Show QR code", "qr"),
+    ("9", "Server information", "status"),
+    ("10", "Xray status / test", "xray-test"),
+    ("11", "Restart Xray", "restart"),
+    ("12", "Diagnostics", "diagnose"),
+    ("13", "Backup", "backup"),
+    ("14", "Exit", "exit"),
+]
+
+
+def _ask(prompt: str, default: str = "") -> str:
+    try:
+        answer = input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise SystemExit(0)
+    return answer or default
+
+
+def interactive(settings: Settings) -> int:
+    while True:
+        banner()
+        for key, label, _ in MENU:
+            print(f" {key.rjust(2)}. {label}")
+        print(cyan("=" * WIDTH))
+        choice = _ask(" Choose: ").strip()
+        action = next((cmd for key, _, cmd in MENU if key == choice), None)
+
+        if action is None:
+            warn("Unknown choice.")
+            continue
+        if action == "exit":
+            print(" Bye.\n")
+            return 0
+
+        try:
+            if action == "add":
+                username = _ask(" Username: ")
+                if not username:
+                    warn("A username is required.")
+                    continue
+                days_text = _ask(" Days valid (0 or blank = never): ", "0")
+                notes = _ask(" Notes (optional): ")
+                args = argparse.Namespace(
+                    username=username,
+                    days=int(days_text or 0),
+                    expire=None,
+                    notes=notes,
+                    qr=False,
+                )
+                cmd_add(settings, args)
+            elif action in {"remove", "disable", "enable", "show", "qr"}:
+                username = _ask(" Username: ")
+                if not username:
+                    warn("A username is required.")
+                    continue
+                args = argparse.Namespace(
+                    username=username, yes=False, fallback=False, json=False, qr=action == "qr"
+                )
+                {
+                    "remove": cmd_remove,
+                    "disable": cmd_disable,
+                    "enable": cmd_enable,
+                    "show": cmd_show,
+                    "qr": cmd_qr,
+                }[action](settings, args)
+            elif action == "renew":
+                username = _ask(" Username: ")
+                days_text = _ask(" Extend by how many days (0 = never expires): ", "30")
+                cmd_renew(
+                    settings,
+                    argparse.Namespace(username=username, days=int(days_text or 30), expire=None),
+                )
+            elif action == "list":
+                cmd_list(settings, argparse.Namespace(json=False))
+            elif action == "status":
+                cmd_status(settings, argparse.Namespace())
+            elif action == "xray-test":
+                cmd_xray_test(settings, argparse.Namespace())
+            elif action == "restart":
+                cmd_restart(settings, argparse.Namespace())
+            elif action == "diagnose":
+                cmd_diagnose(settings, argparse.Namespace())
+            elif action == "backup":
+                cmd_backup(settings, argparse.Namespace(label=""))
+        except UserError as exc:
+            fail(str(exc))
+        except ValueError as exc:
+            fail(str(exc))
+        except KeyboardInterrupt:
+            print()
+            return 0
+
+        _ask("\n Press Enter to continue…")
+
+
+# --------------------------------------------------------------------------- #
+# argument parsing
+# --------------------------------------------------------------------------- #
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="vpnctl",
+        description="RailGate VPN account management. Run without arguments for a menu.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  vpnctl add phone-main\n"
+            "  vpnctl add phone-main --days 30\n"
+            "  vpnctl add laptop --expire 2026-12-31 --qr\n"
+            "  vpnctl show phone-main\n"
+            "  vpnctl uri phone-main\n"
+            "  vpnctl renew phone-main --days 30\n"
+            "  vpnctl diagnose\n"
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"RailGate vpnctl {APP_VERSION}")
+    subparsers = parser.add_subparsers(dest="command")
+
+    add = subparsers.add_parser("add", help="create an account")
+    add.add_argument("username")
+    add.add_argument("--days", type=int, help="valid for N days (0 = never expires)")
+    add.add_argument("--expire", help="expire on a date, e.g. 2026-12-31")
+    add.add_argument("--notes", default="", help="free-text note")
+    add.add_argument("--qr", action="store_true", help="also print a QR code")
+    add.set_defaults(func=cmd_add)
+
+    remove = subparsers.add_parser("remove", aliases=["delete", "del"], help="delete an account")
+    remove.add_argument("username")
+    remove.add_argument("-y", "--yes", action="store_true", help="skip the confirmation")
+    remove.set_defaults(func=cmd_remove)
+
+    disable = subparsers.add_parser("disable", help="disable an account")
+    disable.add_argument("username")
+    disable.set_defaults(func=cmd_disable)
+
+    enable = subparsers.add_parser("enable", help="enable an account")
+    enable.add_argument("username")
+    enable.set_defaults(func=cmd_enable)
+
+    renew = subparsers.add_parser("renew", help="extend or clear an expiry")
+    renew.add_argument("username")
+    renew.add_argument("--days", type=int, help="extend by N days (0 = never expires)")
+    renew.add_argument("--expire", help="set an absolute date, e.g. 2026-12-31")
+    renew.set_defaults(func=cmd_renew)
+
+    regenerate = subparsers.add_parser("regenerate", help="issue a new UUID for an account")
+    regenerate.add_argument("username")
+    regenerate.add_argument("-y", "--yes", action="store_true")
+    regenerate.set_defaults(func=cmd_regenerate)
+
+    listing = subparsers.add_parser("list", aliases=["ls"], help="list accounts")
+    listing.add_argument("--json", action="store_true")
+    listing.set_defaults(func=cmd_list)
+
+    show = subparsers.add_parser("show", help="show an account and its credentials")
+    show.add_argument("username")
+    show.add_argument("--qr", action="store_true")
+    show.add_argument("--json", action="store_true")
+    show.set_defaults(func=cmd_show)
+
+    uri = subparsers.add_parser("uri", help="print only the share link")
+    uri.add_argument("username")
+    uri.add_argument("--fallback", action="store_true", help="print the WebSocket link instead")
+    uri.set_defaults(func=cmd_uri)
+
+    qr = subparsers.add_parser("qr", help="print a scannable QR code")
+    qr.add_argument("username")
+    qr.add_argument("--fallback", action="store_true")
+    qr.set_defaults(func=cmd_qr)
+
+    subparsers.add_parser("status", help="server status summary").set_defaults(func=cmd_status)
+    subparsers.add_parser("xray-test", aliases=["test"], help="validate the Xray configuration").set_defaults(
+        func=cmd_xray_test
+    )
+    subparsers.add_parser("restart", help="restart Xray").set_defaults(func=cmd_restart)
+
+    resync = subparsers.add_parser("resync", help="re-render and apply the configuration")
+    resync.add_argument("--restart", action="store_true", help="force a restart instead of a live sync")
+    resync.set_defaults(func=cmd_resync)
+
+    subparsers.add_parser("diagnose", help="full diagnostics").set_defaults(func=cmd_diagnose)
+
+    backup = subparsers.add_parser("backup", help="create a backup archive")
+    backup.add_argument("--label", default="", help="append a label to the filename")
+    backup.set_defaults(func=cmd_backup)
+
+    subparsers.add_parser("backups", help="list existing backups").set_defaults(func=cmd_backups)
+
+    restore = subparsers.add_parser("restore", help="restore from a backup archive")
+    restore.add_argument("file")
+    restore.add_argument("--confirm", action="store_true", help="required: this overwrites live data")
+    restore.set_defaults(func=cmd_restore)
+
+    subparsers.add_parser("menu", help="open the interactive menu")
+    subparsers.add_parser("help", help="show this help")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+
+    if not argv:
+        settings = get_cli_settings()
+        init_db(settings.db_path)
+        return interactive(settings)
+
+    if argv[0] in {"help", "--help", "-h"}:
+        parser.print_help()
+        return 0
+
+    args = parser.parse_args(argv)
+    settings = get_cli_settings()
+    init_db(settings.db_path)
+
+    if args.command == "menu" or not hasattr(args, "func"):
+        return interactive(settings)
+
+    try:
+        return args.func(settings, args)
+    except UserError as exc:
+        fail(str(exc))
+        return 1
+    except KeyboardInterrupt:
+        print()
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

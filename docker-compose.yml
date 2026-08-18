@@ -1,0 +1,43 @@
+# -----------------------------------------------------------------------------
+# LOCAL DEVELOPMENT ONLY. Railway does not read this file.
+#
+#   cp .env.example .env      # then set ADMIN_PASSWORD
+#   docker compose up --build
+#
+#   Admin panel : http://localhost:8080
+#   Xray (VLESS): localhost:2443
+#
+# Because there is no Railway TCP Proxy locally, the dashboard will show
+# "TCP Proxy: NOT CONFIGURED" unless you set PUBLIC_PROXY_HOST/PORT below.
+# -----------------------------------------------------------------------------
+
+services:
+  railgate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: railgate:local
+    container_name: railgate
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Railway injects PORT in production; supply it explicitly here.
+      PORT: "8080"
+      XRAY_PORT: "2443"
+      DATA_DIR: "/data"
+      APP_ENV: "development"
+      # Pretend a TCP proxy exists so links are generated during local testing.
+      PUBLIC_PROXY_HOST: "${PUBLIC_PROXY_HOST:-localhost}"
+      PUBLIC_PROXY_PORT: "${PUBLIC_PROXY_PORT:-2443}"
+    ports:
+      - "8080:8080"   # admin dashboard + API + WebSocket fallback
+      - "2443:2443"   # Xray VLESS + REALITY (raw TCP)
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

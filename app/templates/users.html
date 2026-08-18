@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Users · {{ settings.app_name }}{% endblock %}
+{% block heading %}VPN accounts{% endblock %}
+
+{% block content %}
+<section class="toolbar">
+  <div class="toolbar-stats">
+    <span class="badge">{{ stats.total }} total</span>
+    <span class="badge badge-ok">{{ stats.active }} active</span>
+    <span class="badge badge-muted">{{ stats.disabled }} disabled</span>
+    <span class="badge badge-warn">{{ stats.expired }} expired</span>
+  </div>
+  <a class="btn btn-primary" href="/users/new">Create VPN account</a>
+</section>
+
+<section class="card">
+  {% if users %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Expires</th>
+          <th>Protocol</th>
+          <th class="ta-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        {% set status = user.status() %}
+        <tr data-user-row="{{ user.id }}">
+          <td>
+            <a class="link" href="/users/{{ user.id }}">{{ user.username }}</a>
+            {% if user.notes %}<div class="muted small">{{ user.notes }}</div>{% endif %}
+          </td>
+          <td><span class="badge badge-{{ 'ok' if status == 'active' else ('warn' if status == 'expired' else 'muted') }}">{{ status }}</span></td>
+          <td class="muted small">{{ user.created_at and user.created_at.strftime('%Y-%m-%d') or '-' }}</td>
+          <td class="small">
+            {% if user.expires_at %}
+              {{ user.expires_at.strftime('%Y-%m-%d') }}
+              <div class="muted">{{ user.remaining_display }}</div>
+            {% else %}
+              Never
+            {% endif %}
+          </td>
+          <td class="muted small">VLESS + REALITY</td>
+          <td class="ta-right">
+            <div class="row-actions">
+              <a class="btn btn-ghost btn-sm" href="/users/{{ user.id }}">Details</a>
+              <button class="btn btn-ghost btn-sm" type="button"
+                      data-action="copy-uri" data-user-id="{{ user.id }}">Copy URI</button>
+              <button class="btn btn-ghost btn-sm" type="button"
+                      data-action="renew" data-user-id="{{ user.id }}"
+                      data-username="{{ user.username }}">Renew</button>
+              {% if user.enabled %}
+              <button class="btn btn-ghost btn-sm" type="button"
+                      data-action="disable" data-user-id="{{ user.id }}"
+                      data-username="{{ user.username }}">Disable</button>
+              {% else %}
+              <button class="btn btn-ghost btn-sm" type="button"
+                      data-action="enable" data-user-id="{{ user.id }}"
+                      data-username="{{ user.username }}">Enable</button>
+              {% endif %}
+              <button class="btn btn-danger btn-sm" type="button"
+                      data-action="delete" data-user-id="{{ user.id }}"
+                      data-username="{{ user.username }}">Delete</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <h2>No accounts yet</h2>
+    <p class="muted">
+      Nobody can connect until you create an account — the gateway ships with an
+      empty user list on purpose.
+    </p>
+    <a class="btn btn-primary" href="/users/new">Create the first account</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
